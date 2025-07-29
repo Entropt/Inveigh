@@ -141,45 +141,118 @@ namespace Quiddity.NTLM
 
         public void ReadBytes(byte[] data)
         {
+            // Check if we have enough data for the minimum NTLM response structure
+            if (data == null || data.Length < 64) // Minimum size for NTLM response
+            {
+                // Initialize with default values
+                this.Signature = new byte[8];
+                this.MessageType = 0;
+                this.LmChallengeResponseLen = 0;
+                this.LmChallengeResponseMaxLen = 0;
+                this.LmChallengeResponseBufferOffset = 0;
+                this.NtChallengeResponseLen = 0;
+                this.NtChallengeResponseMaxLen = 0;
+                this.NtChallengeResponseBufferOffset = 0;
+                this.DomainNameLen = 0;
+                this.DomainNameMaxLen = 0;
+                this.DomainNameBufferOffset = 0;
+                this.UserNameLen = 0;
+                this.UserNameMaxLen = 0;
+                this.UserNameBufferOffset = 0;
+                this.WorkstationLen = 0;
+                this.WorkstationMaxLen = 0;
+                this.WorkstationBufferOffset = 0;
+                this.EncryptedRandomSessionKeyLen = 0;
+                this.EncryptedRandomSessionKeyMaxLen = 0;
+                this.EncryptedRandomSessionKeyBufferOffset = 0;
+                this.NegotiateFlags = new byte[4];
+                this.Version = new byte[0];
+                this.MIC = new byte[0];
+                this.Payload = new byte[0];
+                return;
+            }
             
             using (MemoryStream memoryStream = new MemoryStream(data))
             {
                 PacketReader packetReader = new PacketReader(memoryStream);
-                this.Signature = packetReader.ReadBytes(8);
-                this.MessageType = packetReader.ReadUInt32();
-                this.LmChallengeResponseLen = packetReader.ReadUInt16();
-                this.LmChallengeResponseMaxLen = packetReader.ReadUInt16();
-                this.LmChallengeResponseBufferOffset = packetReader.ReadUInt32();
-                this.NtChallengeResponseLen = packetReader.ReadUInt16();
-                this.NtChallengeResponseMaxLen = packetReader.ReadUInt16();
-                this.NtChallengeResponseBufferOffset = packetReader.ReadUInt32();
-                this.DomainNameLen = packetReader.ReadUInt16();
-                this.DomainNameMaxLen = packetReader.ReadUInt16();
-                this.DomainNameBufferOffset = packetReader.ReadUInt32();
-                this.UserNameLen = packetReader.ReadUInt16();
-                this.UserNameMaxLen = packetReader.ReadUInt16();
-                this.UserNameBufferOffset = packetReader.ReadUInt32();
-                this.WorkstationLen = packetReader.ReadUInt16();
-                this.WorkstationMaxLen = packetReader.ReadUInt16();
-                this.WorkstationBufferOffset = packetReader.ReadUInt32();
-                this.EncryptedRandomSessionKeyLen = packetReader.ReadUInt16();
-                this.EncryptedRandomSessionKeyMaxLen = packetReader.ReadUInt16();
-                this.EncryptedRandomSessionKeyBufferOffset = packetReader.ReadUInt32();
-                this.NegotiateFlags = packetReader.ReadBytes(4);
                 
-                string flags = Convert.ToString(BitConverter.ToUInt32(this.NegotiateFlags, 0), 2).PadLeft(this.NegotiateFlags.Length * 8, '0');
-
-                if (String.Equals(flags.Substring(6, 1), "1"))
+                try
                 {
-                    this.Version = packetReader.ReadBytes(8);
-                }
+                    this.Signature = packetReader.ReadBytes(8);
+                    this.MessageType = packetReader.ReadUInt32();
+                    this.LmChallengeResponseLen = packetReader.ReadUInt16();
+                    this.LmChallengeResponseMaxLen = packetReader.ReadUInt16();
+                    this.LmChallengeResponseBufferOffset = packetReader.ReadUInt32();
+                    this.NtChallengeResponseLen = packetReader.ReadUInt16();
+                    this.NtChallengeResponseMaxLen = packetReader.ReadUInt16();
+                    this.NtChallengeResponseBufferOffset = packetReader.ReadUInt32();
+                    this.DomainNameLen = packetReader.ReadUInt16();
+                    this.DomainNameMaxLen = packetReader.ReadUInt16();
+                    this.DomainNameBufferOffset = packetReader.ReadUInt32();
+                    this.UserNameLen = packetReader.ReadUInt16();
+                    this.UserNameMaxLen = packetReader.ReadUInt16();
+                    this.UserNameBufferOffset = packetReader.ReadUInt32();
+                    this.WorkstationLen = packetReader.ReadUInt16();
+                    this.WorkstationMaxLen = packetReader.ReadUInt16();
+                    this.WorkstationBufferOffset = packetReader.ReadUInt32();
+                    this.EncryptedRandomSessionKeyLen = packetReader.ReadUInt16();
+                    this.EncryptedRandomSessionKeyMaxLen = packetReader.ReadUInt16();
+                    this.EncryptedRandomSessionKeyBufferOffset = packetReader.ReadUInt32();
+                    this.NegotiateFlags = packetReader.ReadBytes(4);
+                    
+                    string flags = Convert.ToString(BitConverter.ToUInt32(this.NegotiateFlags, 0), 2).PadLeft(this.NegotiateFlags.Length * 8, '0');
 
-                if (String.Equals(flags.Substring(16, 1), "1"))
+                    if (String.Equals(flags.Substring(6, 1), "1"))
+                    {
+                        if (memoryStream.Length - memoryStream.Position >= 8)
+                        {
+                            this.Version = packetReader.ReadBytes(8);
+                        }
+                        else
+                        {
+                            this.Version = new byte[0];
+                        }
+                    }
+
+                    if (String.Equals(flags.Substring(16, 1), "1"))
+                    {
+                        if (memoryStream.Length - memoryStream.Position >= 16)
+                        {
+                            this.MIC = packetReader.ReadBytes(16);
+                        }
+                        else
+                        {
+                            this.MIC = new byte[0];
+                        }
+                    }
+
+                    // Check if there's enough data remaining for the payload
+                    if (this.DomainNameBufferOffset > 0 && this.DomainNameBufferOffset < data.Length)
+                    {
+                        int payloadLength = data.Length - (int)this.DomainNameBufferOffset;
+                        if (payloadLength > 0 && memoryStream.Length - memoryStream.Position >= payloadLength)
+                        {
+                            this.Payload = packetReader.ReadBytes(payloadLength);
+                        }
+                        else
+                        {
+                            this.Payload = new byte[0];
+                        }
+                    }
+                    else
+                    {
+                        this.Payload = new byte[0];
+                    }
+                }
+                catch (EndOfStreamException)
                 {
-                    this.MIC = packetReader.ReadBytes(16);
+                    // Handle malformed packets gracefully
+                    if (this.Signature == null) this.Signature = new byte[8];
+                    if (this.NegotiateFlags == null) this.NegotiateFlags = new byte[4];
+                    if (this.Version == null) this.Version = new byte[0];
+                    if (this.MIC == null) this.MIC = new byte[0];
+                    if (this.Payload == null) this.Payload = new byte[0];
                 }
-
-                this.Payload = packetReader.ReadBytes(data.Length - (int)this.DomainNameBufferOffset);
             }
 
         }

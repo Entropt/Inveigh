@@ -517,9 +517,13 @@ namespace Inveigh
 
         internal static void ProcessSMB(byte[] data, string clientIP, string listenerIP, string clientPort, string listenerPort)
         {
-
-            if (data.Length >= 4)
+            try
             {
+                if (data == null || data.Length < 4)
+                {
+                    return;
+                }
+
                 NetBIOSSessionService requestNetBIOSSessionService = new NetBIOSSessionService(data);
                 SMBHeader smbHeader = new SMBHeader();
                 SMB2Header smb2Header = new SMB2Header();
@@ -528,6 +532,12 @@ namespace Inveigh
                 if (requestNetBIOSSessionService.Type == 0)
                 {
                     sessionServiceIndex = 4;
+                }
+
+                // Ensure we have enough data for SMB processing
+                if (data.Length < sessionServiceIndex + 32)
+                {
+                    return;
                 }
 
                 SMBHelper helper = new SMBHelper(data, sessionServiceIndex);
@@ -560,27 +570,33 @@ namespace Inveigh
                                 {
                                     SMBCOMSessionSetupAndXResponse smbCOMSessionSetupAndXResponse = new SMBCOMSessionSetupAndXResponse(data, 32 + sessionServiceIndex);
 
-                                    if (smbCOMSessionSetupAndXResponse.SecurityBlobLength > 0)
+                                    if (smbCOMSessionSetupAndXResponse.SecurityBlobLength > 0 && smbCOMSessionSetupAndXResponse.SecurityBlob != null)
                                     {
 
                                         if (!BitConverter.ToString(smbCOMSessionSetupAndXResponse.SecurityBlob).Contains("2A-86-48-86-F7-12-01-02-02")) // kerberos
                                         {
-                                            NTLMHelper ntlmHelper = new NTLMHelper(smbCOMSessionSetupAndXResponse.SecurityBlob);
-
-                                            if (ntlmHelper.Signature.StartsWith("NTLMSSP"))
+                                            try
                                             {
+                                                NTLMHelper ntlmHelper = new NTLMHelper(smbCOMSessionSetupAndXResponse.SecurityBlob);
 
-                                                if (ntlmHelper.MessageType == 2)
+                                                if (!string.IsNullOrEmpty(ntlmHelper.Signature) && ntlmHelper.Signature.StartsWith("NTLMSSP"))
                                                 {
-                                                    NTLMChallenge ntlmChallenge = new NTLMChallenge(smbCOMSessionSetupAndXResponse.SecurityBlob);
-                                                    session = String.Concat(listenerIP, ":", listenerPort);
-                                                    challenge = BitConverter.ToString(ntlmChallenge.ServerChallenge).Replace("-", "");
-                                                    Program.smbSessionTable[session] = challenge;
-                                                    Output.Queue(string.Format("[+] [{0}] SMB({1}) NTLM challenge [{2}] sent to {3}:{4}", Output.Timestamp(), clientPort, challenge, clientIP, listenerPort));
+
+                                                    if (ntlmHelper.MessageType == 2)
+                                                    {
+                                                        NTLMChallenge ntlmChallenge = new NTLMChallenge(smbCOMSessionSetupAndXResponse.SecurityBlob);
+                                                        session = String.Concat(listenerIP, ":", listenerPort);
+                                                        challenge = BitConverter.ToString(ntlmChallenge.ServerChallenge).Replace("-", "");
+                                                        Program.smbSessionTable[session] = challenge;
+                                                        Output.Queue(string.Format("[+] [{0}] SMB({1}) NTLM challenge [{2}] sent to {3}:{4}", Output.Timestamp(), clientPort, challenge, clientIP, listenerPort));
+                                                    }
+
                                                 }
-
                                             }
-
+                                            catch (Exception ex)
+                                            {
+                                                Output.Queue(string.Format("[-] [{0}] Error processing SMB1 NTLM response from {1}:{2} - {3}", Output.Timestamp(), clientIP, clientPort, ex.Message));
+                                            }
                                         }
                                         else
                                         {
@@ -594,37 +610,43 @@ namespace Inveigh
                                 {
                                     SMBCOMSessionSetupAndXRequest smbCOMSessionSetupAndXRequest = new SMBCOMSessionSetupAndXRequest(data, 32 + sessionServiceIndex);
 
-                                    if (smbCOMSessionSetupAndXRequest.SecurityBlobLength > 0)
+                                    if (smbCOMSessionSetupAndXRequest.SecurityBlobLength > 0 && smbCOMSessionSetupAndXRequest.SecurityBlob != null)
                                     {
 
                                         if (!BitConverter.ToString(smbCOMSessionSetupAndXRequest.SecurityBlob).Contains("2A-86-48-86-F7-12-01-02-02")) // kerberos
                                         {
-                                            NTLMHelper ntlmHelper = new NTLMHelper(smbCOMSessionSetupAndXRequest.SecurityBlob);
-
-                                            if (ntlmHelper.Signature.StartsWith("NTLMSSP"))
+                                            try
                                             {
+                                                NTLMHelper ntlmHelper = new NTLMHelper(smbCOMSessionSetupAndXRequest.SecurityBlob);
 
-                                                if (ntlmHelper.MessageType == 3)
+                                                if (!string.IsNullOrEmpty(ntlmHelper.Signature) && ntlmHelper.Signature.StartsWith("NTLMSSP"))
                                                 {
-                                                    NTLMResponse ntlmResponse = new NTLMResponse(smbCOMSessionSetupAndXRequest.SecurityBlob);
-                                                    session = String.Concat(clientIP, ":", clientPort);
-                                                    challenge = Program.smbSessionTable[session]?.ToString();
-                                                    string domain = Encoding.Unicode.GetString(ntlmResponse.DomainName);
-                                                    string user = Encoding.Unicode.GetString(ntlmResponse.UserName);
-                                                    string host = Encoding.Unicode.GetString(ntlmResponse.Workstation);
-                                                    string response = BitConverter.ToString(ntlmResponse.NtChallengeResponse).Replace("-", "");
-                                                    string lmResponse = "";
 
-                                                    if (!Utilities.ArrayIsNullOrEmpty(ntlmResponse.UserName))
+                                                    if (ntlmHelper.MessageType == 3)
                                                     {
-                                                        lmResponse = BitConverter.ToString(ntlmResponse.LmChallengeResponse).Replace("-", "");
+                                                        NTLMResponse ntlmResponse = new NTLMResponse(smbCOMSessionSetupAndXRequest.SecurityBlob);
+                                                        session = String.Concat(clientIP, ":", clientPort);
+                                                        challenge = Program.smbSessionTable[session]?.ToString();
+                                                        string domain = Encoding.Unicode.GetString(ntlmResponse.DomainName);
+                                                        string user = Encoding.Unicode.GetString(ntlmResponse.UserName);
+                                                        string host = Encoding.Unicode.GetString(ntlmResponse.Workstation);
+                                                        string response = BitConverter.ToString(ntlmResponse.NtChallengeResponse).Replace("-", "");
+                                                        string lmResponse = "";
+
+                                                        if (!Utilities.ArrayIsNullOrEmpty(ntlmResponse.UserName))
+                                                        {
+                                                            lmResponse = BitConverter.ToString(ntlmResponse.LmChallengeResponse).Replace("-", "");
+                                                        }
+
+                                                        Output.NTLMOutput(user, domain, challenge, response, clientIP, host, "SMB", listenerPort, clientPort, lmResponse);
                                                     }
 
-                                                    Output.NTLMOutput(user, domain, challenge, response, clientIP, host, "SMB", listenerPort, clientPort, lmResponse);
                                                 }
-
                                             }
-
+                                            catch (Exception ex)
+                                            {
+                                                Output.Queue(string.Format("[-] [{0}] Error processing SMB1 NTLM request from {1}:{2} - {3}", Output.Timestamp(), clientIP, clientPort, ex.Message));
+                                            }
                                         }
 
                                     }
@@ -663,27 +685,33 @@ namespace Inveigh
                                 {
                                     SMB2SessionSetupResponse smb2SessionSetupResponse = new SMB2SessionSetupResponse(data, 64 + sessionServiceIndex);
 
-                                    if (smb2SessionSetupResponse.SecurityBufferLength > 0)
+                                    if (smb2SessionSetupResponse.SecurityBufferLength > 0 && smb2SessionSetupResponse.Buffer != null)
                                     {
 
                                         if (!BitConverter.ToString(smb2SessionSetupResponse.Buffer).Contains("2A-86-48-86-F7-12-01-02-02")) // kerberos
                                         {
-                                            NTLMHelper ntlmHelper = new NTLMHelper(smb2SessionSetupResponse.Buffer);
-
-                                            if (ntlmHelper.Signature.StartsWith("NTLMSSP"))
+                                            try
                                             {
+                                                NTLMHelper ntlmHelper = new NTLMHelper(smb2SessionSetupResponse.Buffer);
 
-                                                if (ntlmHelper.MessageType == 2)
+                                                if (!string.IsNullOrEmpty(ntlmHelper.Signature) && ntlmHelper.Signature.StartsWith("NTLMSSP"))
                                                 {
-                                                    NTLMChallenge ntlmChallenge = new NTLMChallenge(smb2SessionSetupResponse.Buffer);
-                                                    session = BitConverter.ToString(smb2Header.SessionId).Replace("-", "");
-                                                    challenge = BitConverter.ToString(ntlmChallenge.ServerChallenge).Replace("-", "");
-                                                    Program.smbSessionTable[session] = challenge;
-                                                    Output.Queue(String.Format("[+] [{0}] SMB({1}) NTLM challenge [{2}] sent to {3}:{4}", Output.Timestamp(), clientPort, challenge, clientIP, listenerPort));
+
+                                                    if (ntlmHelper.MessageType == 2)
+                                                    {
+                                                        NTLMChallenge ntlmChallenge = new NTLMChallenge(smb2SessionSetupResponse.Buffer);
+                                                        session = BitConverter.ToString(smb2Header.SessionId).Replace("-", "");
+                                                        challenge = BitConverter.ToString(ntlmChallenge.ServerChallenge).Replace("-", "");
+                                                        Program.smbSessionTable[session] = challenge;
+                                                        Output.Queue(String.Format("[+] [{0}] SMB({1}) NTLM challenge [{2}] sent to {3}:{4}", Output.Timestamp(), clientPort, challenge, clientIP, listenerPort));
+                                                    }
+
                                                 }
-
                                             }
-
+                                            catch (Exception ex)
+                                            {
+                                                Output.Queue(string.Format("[-] [{0}] Error processing SMB2 NTLM response from {1}:{2} - {3}", Output.Timestamp(), clientIP, clientPort, ex.Message));
+                                            }
                                         }
                                         else
                                         {
@@ -696,38 +724,43 @@ namespace Inveigh
                                 {
                                     SMB2SessionSetupRequest smb2SessionSetupRequest = new SMB2SessionSetupRequest(data, 64 + sessionServiceIndex);
 
-                                    if (smb2SessionSetupRequest.SecurityBufferLength > 0)
+                                    if (smb2SessionSetupRequest.SecurityBufferLength > 0 && smb2SessionSetupRequest.Buffer != null)
                                     {
 
                                         if (!BitConverter.ToString(smb2SessionSetupRequest.Buffer).Contains("2A-86-48-86-F7-12-01-02-02")) // kerberos
                                         {
-
-                                            NTLMHelper ntlmHelper = new NTLMHelper(smb2SessionSetupRequest.Buffer);
-
-                                            if (ntlmHelper.Signature.StartsWith("NTLMSSP"))
+                                            try
                                             {
-                                                
-                                                if (ntlmHelper.MessageType == 3)
+                                                NTLMHelper ntlmHelper = new NTLMHelper(smb2SessionSetupRequest.Buffer);
+
+                                                if (!string.IsNullOrEmpty(ntlmHelper.Signature) && ntlmHelper.Signature.StartsWith("NTLMSSP"))
                                                 {
-                                                    NTLMResponse ntlmResponse = new NTLMResponse(smb2SessionSetupRequest.Buffer);
-                                                    session = BitConverter.ToString(smb2Header.SessionId).Replace("-", "");
-                                                    challenge = Program.smbSessionTable[session]?.ToString();
-                                                    string domain = Encoding.Unicode.GetString(ntlmResponse.DomainName);
-                                                    string user = Encoding.Unicode.GetString(ntlmResponse.UserName);
-                                                    string host = Encoding.Unicode.GetString(ntlmResponse.Workstation);
-                                                    string response = BitConverter.ToString(ntlmResponse.NtChallengeResponse).Replace("-", "");
-                                                    string lmResponse = "";
-
-                                                    if (!Utilities.ArrayIsNullOrEmpty(ntlmResponse.UserName))
-                                                    {
-                                                        lmResponse = BitConverter.ToString(ntlmResponse.LmChallengeResponse).Replace("-", "");
-                                                    }
                                                     
-                                                    Output.NTLMOutput(user, domain, challenge, response, clientIP, host, "SMB", listenerPort, clientPort, lmResponse);
+                                                    if (ntlmHelper.MessageType == 3)
+                                                    {
+                                                        NTLMResponse ntlmResponse = new NTLMResponse(smb2SessionSetupRequest.Buffer);
+                                                        session = BitConverter.ToString(smb2Header.SessionId).Replace("-", "");
+                                                        challenge = Program.smbSessionTable[session]?.ToString();
+                                                        string domain = Encoding.Unicode.GetString(ntlmResponse.DomainName);
+                                                        string user = Encoding.Unicode.GetString(ntlmResponse.UserName);
+                                                        string host = Encoding.Unicode.GetString(ntlmResponse.Workstation);
+                                                        string response = BitConverter.ToString(ntlmResponse.NtChallengeResponse).Replace("-", "");
+                                                        string lmResponse = "";
+
+                                                        if (!Utilities.ArrayIsNullOrEmpty(ntlmResponse.UserName))
+                                                        {
+                                                            lmResponse = BitConverter.ToString(ntlmResponse.LmChallengeResponse).Replace("-", "");
+                                                        }
+                                                        
+                                                        Output.NTLMOutput(user, domain, challenge, response, clientIP, host, "SMB", listenerPort, clientPort, lmResponse);
+                                                    }
+
                                                 }
-
                                             }
-
+                                            catch (Exception ex)
+                                            {
+                                                Output.Queue(string.Format("[-] [{0}] Error processing SMB2 NTLM request from {1}:{2} - {3}", Output.Timestamp(), clientIP, clientPort, ex.Message));
+                                            }
                                         }
 
                                     }
@@ -738,7 +771,10 @@ namespace Inveigh
                     }
 
                 }
-
+            }
+            catch (Exception ex)
+            {
+                Output.Queue(string.Format("[-] [{0}] Packet sniffing error detected - {1}", Output.Timestamp(), ex.Message));
             }
 
         }

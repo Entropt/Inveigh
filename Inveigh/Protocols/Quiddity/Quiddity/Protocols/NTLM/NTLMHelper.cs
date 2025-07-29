@@ -29,6 +29,7 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+using System;
 using Quiddity.SPNEGO;
 using Quiddity.Support;
 using System.IO;
@@ -47,7 +48,12 @@ namespace Quiddity.NTLM
         }
         public NTLMHelper(byte[]data)
         {
-            string signature = Encoding.UTF8.GetString(data);
+            if (data == null || data.Length == 0)
+            {
+                return;
+            }
+
+            string signature = Encoding.UTF8.GetString(data, 0, Math.Min(8, data.Length));
 
             if (signature.StartsWith("NTLMSSP"))
             {
@@ -55,8 +61,20 @@ namespace Quiddity.NTLM
             }
             else
             {
-                SPNEGONegTokenInit token = this.Decode(data);
-                this.ReadBytes(token.MechToken, 0);
+                try
+                {
+                    SPNEGONegTokenInit token = this.Decode(data);
+                    if (token.MechToken != null && token.MechToken.Length > 0)
+                    {
+                        this.ReadBytes(token.MechToken, 0);
+                    }
+                }
+                catch (Exception)
+                {
+                    // Handle malformed SPNEGO tokens gracefully
+                    this.Signature = string.Empty;
+                    this.MessageType = 0;
+                }
             }
         }
 
@@ -67,13 +85,30 @@ namespace Quiddity.NTLM
 
         public void ReadBytes(byte[] data, int offset)
         {
+            // Check if we have enough data to read the minimum NTLM header (8 bytes signature + 2 bytes message type)
+            if (data == null || data.Length < offset + 10)
+            {
+                this.Signature = string.Empty;
+                this.MessageType = 0;
+                return;
+            }
 
             using (MemoryStream memoryStream = new MemoryStream(data))
             {
                 PacketReader packetReader = new PacketReader(memoryStream);
                 memoryStream.Position = offset;
-                this.Signature = Encoding.UTF8.GetString(packetReader.ReadBytes(8));
-                this.MessageType = packetReader.ReadUInt16();
+                
+                try
+                {
+                    this.Signature = Encoding.UTF8.GetString(packetReader.ReadBytes(8));
+                    this.MessageType = packetReader.ReadUInt16();
+                }
+                catch (EndOfStreamException)
+                {
+                    // Handle the case where stream is shorter than expected
+                    this.Signature = string.Empty;
+                    this.MessageType = 0;
+                }
             }
 
         }

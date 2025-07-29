@@ -150,24 +150,70 @@ namespace Quiddity.NTLM
 
         public void ReadBytes(byte[] data, int offset)
         {
+            // Check if we have enough data for the minimum NTLM challenge structure
+            if (data == null || data.Length < offset + 48) // Minimum size for NTLM challenge
+            {
+                // Initialize with default values
+                this.Signature = new byte[8];
+                this.MessageType = 0;
+                this.TargetNameLen = 0;
+                this.TargetNameMaxLen = 0;
+                this.TargetNameBufferOffset = 0;
+                this.NegotiateFlags = new byte[4];
+                this.ServerChallenge = new byte[8];
+                this.Reserved = 0;
+                this.TargetInfoLen = 0;
+                this.TargetInfoMaxLen = 0;
+                this.TargetInfoBufferOffset = 0;
+                this.Version = new byte[8];
+                this.Payload = new byte[0];
+                return;
+            }
 
             using (MemoryStream memoryStream = new MemoryStream(data))
             {
                 PacketReader packetReader = new PacketReader(memoryStream);
                 memoryStream.Position = offset;
-                this.Signature = packetReader.ReadBytes(8);
-                this.MessageType = packetReader.ReadUInt32();
-                this.TargetNameLen = packetReader.ReadUInt16();
-                this.TargetNameMaxLen = packetReader.ReadUInt16();
-                this.TargetNameBufferOffset = packetReader.ReadUInt32();
-                this.NegotiateFlags = packetReader.ReadBytes(4);
-                this.ServerChallenge = packetReader.ReadBytes(8);
-                this.Reserved = packetReader.ReadUInt64();
-                this.TargetInfoLen = packetReader.ReadUInt16();
-                this.TargetInfoMaxLen = packetReader.ReadUInt16();
-                this.TargetInfoBufferOffset = packetReader.ReadUInt32();
-                this.Version = packetReader.ReadBytes(8);
-                this.Payload = packetReader.ReadBytes(16);
+                
+                try
+                {
+                    this.Signature = packetReader.ReadBytes(8);
+                    this.MessageType = packetReader.ReadUInt32();
+                    this.TargetNameLen = packetReader.ReadUInt16();
+                    this.TargetNameMaxLen = packetReader.ReadUInt16();
+                    this.TargetNameBufferOffset = packetReader.ReadUInt32();
+                    this.NegotiateFlags = packetReader.ReadBytes(4);
+                    this.ServerChallenge = packetReader.ReadBytes(8);
+                    this.Reserved = packetReader.ReadUInt64();
+                    this.TargetInfoLen = packetReader.ReadUInt16();
+                    this.TargetInfoMaxLen = packetReader.ReadUInt16();
+                    this.TargetInfoBufferOffset = packetReader.ReadUInt32();
+                    this.Version = packetReader.ReadBytes(8);
+                    
+                    // Check if we have enough data remaining for the payload
+                    long remainingBytes = memoryStream.Length - memoryStream.Position;
+                    if (remainingBytes >= 16)
+                    {
+                        this.Payload = packetReader.ReadBytes(16);
+                    }
+                    else if (remainingBytes > 0)
+                    {
+                        this.Payload = packetReader.ReadBytes((int)remainingBytes);
+                    }
+                    else
+                    {
+                        this.Payload = new byte[0];
+                    }
+                }
+                catch (EndOfStreamException)
+                {
+                    // Handle malformed packets gracefully
+                    if (this.Signature == null) this.Signature = new byte[8];
+                    if (this.NegotiateFlags == null) this.NegotiateFlags = new byte[4];
+                    if (this.ServerChallenge == null) this.ServerChallenge = new byte[8];
+                    if (this.Version == null) this.Version = new byte[8];
+                    if (this.Payload == null) this.Payload = new byte[0];
+                }
             }
 
         }
